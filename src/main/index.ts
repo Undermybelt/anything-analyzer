@@ -12,9 +12,10 @@ import { CaptureEngine } from "./capture/capture-engine";
 import { SessionManager } from "./session/session-manager";
 import { AiAnalyzer } from "./ai/ai-analyzer";
 import { WindowManager } from "./window";
-import { registerIpcHandlers, loadProxyConfig, applyProxy } from "./ipc";
+import { registerIpcHandlers, loadProxyConfig, applyProxy, loadMCPServerConfig } from "./ipc";
 import { Updater } from "./updater";
 import { MCPClientManager } from "./mcp/mcp-manager";
+import { initMCPServer, stopMCPServer } from "./mcp/mcp-server";
 
 const windowManager = new WindowManager();
 const mcpManager = new MCPClientManager();
@@ -82,6 +83,7 @@ app.whenReady().then(() => {
     windowManager,
     updater,
     mcpManager,
+    sessionsRepo,
     requestsRepo,
     jsHooksRepo,
     storageSnapshotsRepo,
@@ -90,6 +92,15 @@ app.whenReady().then(() => {
 
   // Check for updates on startup (non-blocking, delayed 3s)
   setTimeout(() => updater.checkForUpdates(), 3000);
+
+  // Start MCP Server if enabled
+  const mcpServerConfig = loadMCPServerConfig();
+  if (mcpServerConfig.enabled) {
+    initMCPServer(
+      { sessionManager, aiAnalyzer, windowManager, requestsRepo, jsHooksRepo, storageSnapshotsRepo, reportsRepo },
+      mcpServerConfig.port,
+    ).catch((err) => console.error("Failed to start MCP Server:", err));
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -108,6 +119,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  stopMCPServer().catch(() => {});
   mcpManager.disconnectAll().catch(() => {});
   closeDatabase();
 });

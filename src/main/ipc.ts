@@ -1,5 +1,5 @@
 import { ipcMain, dialog, app, session } from "electron";
-import type { LLMProviderConfig, MCPServerConfig, ProxyConfig, PromptTemplate } from "@shared/types";
+import type { LLMProviderConfig, MCPServerConfig, MCPServerSettings, ProxyConfig, PromptTemplate } from "@shared/types";
 import type { SessionManager } from "./session/session-manager";
 import type { AiAnalyzer } from "./ai/ai-analyzer";
 import type { WindowManager } from "./window";
@@ -22,6 +22,7 @@ import type {
   JsHooksRepo,
   StorageSnapshotsRepo,
   AnalysisReportsRepo,
+  SessionsRepo,
 } from "./db/repositories";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -35,6 +36,7 @@ export function registerIpcHandlers(deps: {
   windowManager: WindowManager;
   updater: Updater;
   mcpManager: MCPClientManager;
+  sessionsRepo: SessionsRepo;
   requestsRepo: RequestsRepo;
   jsHooksRepo: JsHooksRepo;
   storageSnapshotsRepo: StorageSnapshotsRepo;
@@ -46,6 +48,7 @@ export function registerIpcHandlers(deps: {
     windowManager,
     updater,
     mcpManager,
+    sessionsRepo,
     requestsRepo,
     jsHooksRepo,
     storageSnapshotsRepo,
@@ -104,6 +107,12 @@ export function registerIpcHandlers(deps: {
 
   ipcMain.handle("browser:reload", async () => {
     windowManager.reload();
+  });
+
+  ipcMain.handle("browser:clearEnv", async () => {
+    await session.defaultSession.clearStorageData();
+    await session.defaultSession.clearCache();
+    windowManager.getTabManager()?.getActiveWebContents()?.reload();
   });
 
   ipcMain.handle("browser:setRatio", async (_event, ratio: number) => {
@@ -336,7 +345,7 @@ export function registerIpcHandlers(deps: {
     if (!win) return false;
     const requests = requestsRepo.findBySession(sessionId);
     if (requests.length === 0) return false;
-    const sessionInfo = deps.sessionsRepo.findById(sessionId);
+    const sessionInfo = sessionsRepo.findById(sessionId);
     const sessionName = sessionInfo?.name || "requests";
     const timestamp = new Date().toISOString().slice(0, 10);
     const defaultName = `${sessionName}-${timestamp}.json`;
@@ -362,6 +371,22 @@ export function registerIpcHandlers(deps: {
     saveProxyConfigFile(config);
     await applyProxy(config);
   });
+
+  // ---- MCP Server Config ----
+
+  ipcMain.handle("mcp-server:getConfig", async () => {
+    return loadMCPServerConfig();
+  });
+
+  ipcMain.handle("mcp-server:saveConfig", async (_event, config: MCPServerSettings) => {
+    saveMCPServerConfig(config);
+  });
+
+  ipcMain.handle("mcp-server:status", async () => {
+    const { isMCPServerRunning } = await import("./mcp/mcp-server");
+    const config = loadMCPServerConfig();
+    return { running: isMCPServerRunning(), port: config.port };
+  });
 }
 
 // ---- Config persistence helpers ----
@@ -370,7 +395,7 @@ function getConfigPath(): string {
   return join(app.getPath("userData"), "llm-config.json");
 }
 
-function loadLLMConfig(): LLMProviderConfig | null {
+export function loadLLMConfig(): LLMProviderConfig | null {
   const path = getConfigPath();
   if (!existsSync(path)) return null;
   try {
@@ -414,4 +439,26 @@ export async function applyProxy(config: ProxyConfig | null): Promise<void> {
     : "";
   const proxyRules = `${config.type}://${auth}${config.host}:${config.port}`;
   await session.defaultSession.setProxy({ proxyRules });
+}
+
+// ---- MCP Server config persistence ----
+
+const DEFAULT_MCP_SERVER_CONFIG: MCPServerSettings = { enabled: false, port: 23816 };
+
+function getMCPServerConfigPath(): string {
+  return join(app.getPath("userData"), "mcp-server-config.json");
+}
+
+export function loadMCPServerConfig(): MCPServerSettings {
+  const path = getMCPServerConfigPath();
+  if (!existsSync(path)) return DEFAULT_MCP_SERVER_CONFIG;
+  try {
+    return { ...DEFAULT_MCP_SERVER_CONFIG, ...JSON.parse(readFileSync(path, "utf-8")) };
+  } catch {
+    return DEFAULT_MCP_SERVER_CONFIG;
+  }
+}
+
+function saveMCPServerConfig(config: MCPServerSettings): void {
+  writeFileSync(getMCPServerConfigPath(), JSON.stringify(config, null, 2), "utf-8");
 }

@@ -190,6 +190,21 @@ export class TabManager extends EventEmitter {
   private setupTabListeners(tab: TabInfo): void {
     const wc = tab.view.webContents;
 
+    // Prevent page scripts from closing the window via window.close()
+    // This avoids crashes when the WebContentsView is destroyed unexpectedly.
+    wc.on("will-prevent-unload", (event) => {
+      // Always prevent the close — do not show the "Leave site?" dialog
+      event.preventDefault();
+    });
+
+    // Override window.close() in page context to make it a no-op
+    wc.on("did-finish-load", () => {
+      wc.executeJavaScript("window.close = function() {};").catch(() => {});
+    });
+    wc.on("did-navigate-in-page", () => {
+      wc.executeJavaScript("window.close = function() {};").catch(() => {});
+    });
+
     // Intercept window.open / target="_blank" — open as new internal tab
     wc.setWindowOpenHandler((details) => {
       // Create a new tab with the popup URL
@@ -219,9 +234,27 @@ export class TabManager extends EventEmitter {
       });
     });
 
-    // Handle window.close() from popup pages
+    // Handle unexpected WebContents destruction (e.g., window.close()
+    // bypassed our safeguards). Clean up gracefully instead of crashing.
     wc.on("destroyed", () => {
-      if (!this.destroyedTabs.has(tab.id) && this.tabs.has(tab.id)) {
+      if (this.destroyedTabs.has(tab.id) || !this.tabs.has(tab.id)) return;
+
+      // If this is the last tab, replace it with a new blank tab
+      // instead of letting the app crash with no view.
+      if (this.tabs.size <= 1) {
+        this.tabs.delete(tab.id);
+        this.destroyedTabs.add(tab.id);
+        this.activeTabId = null;
+        // Remove destroyed view from window
+        if (this.mainWindow) {
+          try {
+            this.mainWindow.contentView.removeChildView(tab.view);
+          } catch { /* already removed */ }
+        }
+        // Create a replacement tab
+        this.createTab();
+        this.emit("tab-closed", { tabId: tab.id });
+      } else {
         this.closeTab(tab.id);
       }
     });

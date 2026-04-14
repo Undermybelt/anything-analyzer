@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Modal, Form, Input, Select, InputNumber, Button, Progress, Divider, Space, Tag, message, Typography } from 'antd'
-import { SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, CloudDownloadOutlined, EditOutlined, ApiOutlined, GlobalOutlined } from '@ant-design/icons'
-import type { LLMProviderConfig, LLMProviderType, OpenAIApiType, ProxyConfig, UpdateStatus } from '@shared/types'
+import { Modal, Form, Input, Select, InputNumber, Button, Progress, Divider, Space, Tag, message, Typography, Switch, Badge } from 'antd'
+import { SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, CloudDownloadOutlined, EditOutlined, ApiOutlined, GlobalOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import type { LLMProviderConfig, LLMProviderType, OpenAIApiType, ProxyConfig, UpdateStatus, MCPServerSettings } from '@shared/types'
 import PromptTemplateModal from './PromptTemplateModal'
 import MCPServerModal from './MCPServerModal'
 
@@ -28,6 +28,11 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [proxyForm] = Form.useForm()
   const proxyType = Form.useWatch('type', proxyForm)
 
+  // MCP Server state
+  const [mcpServerEnabled, setMcpServerEnabled] = useState(false)
+  const [mcpServerPort, setMcpServerPort] = useState(23816)
+  const [mcpServerRunning, setMcpServerRunning] = useState(false)
+
   useEffect(() => {
     if (open) {
       window.electronAPI.getLLMConfig().then(config => {
@@ -37,6 +42,14 @@ export default function SettingsModal({ open, onClose }: Props) {
         if (config) proxyForm.setFieldsValue(config)
       })
       window.electronAPI.getAppVersion().then(setAppVersion)
+      // Load MCP Server config and status
+      window.electronAPI.getMCPServerConfig().then(config => {
+        setMcpServerEnabled(config.enabled)
+        setMcpServerPort(config.port)
+      })
+      window.electronAPI.getMCPServerStatus().then(status => {
+        setMcpServerRunning(status.running)
+      })
     }
   }, [open, form, proxyForm])
 
@@ -226,6 +239,52 @@ export default function SettingsModal({ open, onClose }: Props) {
       }}>
         保存代理设置
       </Button>
+
+      <Divider style={{ margin: '12px 0' }} />
+
+      {/* MCP Server Settings */}
+      <div style={{ marginBottom: 8 }}>
+        <ThunderboltOutlined style={{ marginRight: 6 }} />
+        <Text strong>MCP Server</Text>
+        <Badge
+          status={mcpServerRunning ? 'success' : 'default'}
+          text={mcpServerRunning ? '运行中' : '已停止'}
+          style={{ marginLeft: 12, fontSize: 12 }}
+        />
+      </div>
+      <Space direction="vertical" style={{ width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text>启用 MCP Server</Text>
+          <Switch checked={mcpServerEnabled} onChange={setMcpServerEnabled} />
+        </div>
+        {mcpServerEnabled && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Text>端口</Text>
+              <InputNumber
+                min={1024}
+                max={65535}
+                value={mcpServerPort}
+                onChange={v => v && setMcpServerPort(v)}
+                style={{ width: 120 }}
+              />
+            </div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              外部工具配置 URL: <Text code copyable style={{ fontSize: 12 }}>http://localhost:{mcpServerPort}/mcp</Text>
+            </Text>
+          </>
+        )}
+        <Button type="primary" block onClick={async () => {
+          const config: MCPServerSettings = { enabled: mcpServerEnabled, port: mcpServerPort }
+          await window.electronAPI.saveMCPServerConfig(config)
+          message.success('MCP Server 配置已保存，重启应用后生效')
+          // Refresh status
+          const status = await window.electronAPI.getMCPServerStatus()
+          setMcpServerRunning(status.running)
+        }}>
+          保存 MCP Server 设置
+        </Button>
+      </Space>
 
       <PromptTemplateModal open={templateModalOpen} onClose={() => setTemplateModalOpen(false)} />
       <MCPServerModal open={mcpModalOpen} onClose={() => setMcpModalOpen(false)} />

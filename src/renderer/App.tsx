@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { ConfigProvider, Layout, Tabs, theme, Typography } from 'antd'
+import { ConfigProvider, Layout, Tabs, theme, Typography, message } from 'antd'
 import { SettingOutlined } from '@ant-design/icons'
 import zhCN from 'antd/locale/zh_CN'
 
@@ -189,6 +189,17 @@ function App(): React.ReactElement {
     }
   }, [currentSessionId])
 
+  // Clear browser environment
+  const handleClearEnv = useCallback(async () => {
+    try {
+      await window.electronAPI.clearBrowserEnv()
+      message.success('浏览器环境已清除')
+    } catch (err) {
+      console.error('Clear env failed:', err)
+      message.error('清除浏览器环境失败')
+    }
+  }, [])
+
   const handleFollowUp = useCallback(async (message: string) => {
     if (!currentSessionId) return
     await sendFollowUp(currentSessionId, message)
@@ -332,6 +343,7 @@ function App(): React.ReactElement {
             isAnalyzing={isAnalyzing}
             selectedSeqCount={selectedSeqs.length}
             onExport={handleExport}
+            onClearEnv={handleClearEnv}
           />
 
           {/* Data panel area with tabs */}

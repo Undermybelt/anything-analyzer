@@ -1,6 +1,6 @@
 {
   "name": "anything-analyzer",
-  "version": "2.4.2",
+  "version": "2.5.0",
   "description": "Universal web protocol analyzer with embedded browser and AI-powered analysis",
   "packageManager": "pnpm@10.24.0",
   "main": "./out/main/index.js",
@@ -24,7 +24,8 @@
     "react-markdown": "^9.0.3",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

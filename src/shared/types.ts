@@ -224,6 +224,11 @@ export interface ProxyConfig {
   password?: string;
 }
 
+export interface MCPServerSettings {
+  enabled: boolean;
+  port: number;
+}
+
 // ---- Filtered Request ----
 
 export interface FilteredRequest {
@@ -300,6 +305,7 @@ export const IPC_CHANNELS = {
   BROWSER_BACK: "browser:back",
   BROWSER_FORWARD: "browser:forward",
   BROWSER_RELOAD: "browser:reload",
+  BROWSER_CLEAR_ENV: "browser:clearEnv",
 
   // Data
   DATA_REQUESTS: "data:requests",
@@ -352,6 +358,11 @@ export const IPC_CHANNELS = {
   // Proxy
   PROXY_GET: "proxy:get",
   PROXY_SAVE: "proxy:save",
+
+  // MCP Server
+  MCP_SERVER_GET_CONFIG: "mcp-server:getConfig",
+  MCP_SERVER_SAVE_CONFIG: "mcp-server:saveConfig",
+  MCP_SERVER_STATUS: "mcp-server:status",
 } as const;
 
 // ---- Electron API (exposed via contextBridge) ----
@@ -433,6 +444,14 @@ export interface ElectronAPI {
   // Proxy
   getProxyConfig: () => Promise<ProxyConfig | null>;
   saveProxyConfig: (config: ProxyConfig) => Promise<void>;
+
+  // Browser environment
+  clearBrowserEnv: () => Promise<void>;
+
+  // MCP Server
+  getMCPServerConfig: () => Promise<MCPServerSettings>;
+  saveMCPServerConfig: (config: MCPServerSettings) => Promise<void>;
+  getMCPServerStatus: () => Promise<{ running: boolean; port: number | null }>;
 }
 
 declare global {

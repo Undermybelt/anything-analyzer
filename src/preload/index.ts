@@ -101,6 +101,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveProxyConfig: (config: unknown) =>
     ipcRenderer.invoke("proxy:save", config),
 
+  // Browser environment
+  clearBrowserEnv: () => ipcRenderer.invoke("browser:clearEnv"),
+
+  // MCP Server
+  getMCPServerConfig: () => ipcRenderer.invoke("mcp-server:getConfig"),
+  saveMCPServerConfig: (config: unknown) =>
+    ipcRenderer.invoke("mcp-server:saveConfig", config),
+  getMCPServerStatus: () => ipcRenderer.invoke("mcp-server:status"),
+
   // Tab events
   onTabCreated: (callback: (tab: unknown) => void) => {
     ipcRenderer.on("tabs:created", (_event, data) => callback(data));
