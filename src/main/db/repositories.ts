@@ -6,6 +6,7 @@ import type {
   StorageSnapshot,
   AnalysisReport,
   FingerprintProfile,
+  AiRequestLog,
 } from '@shared/types'
 
 // ============================================================
@@ -358,5 +359,77 @@ export class ChatMessagesRepo {
 
   deleteByReport(reportId: string): void {
     this.stmts.deleteByReport.run(reportId)
+  }
+}
+
+// ============================================================
+// AI Request Log Repository
+// ============================================================
+
+/** Columns returned in list queries (excludes large body fields) */
+const AI_LOG_LIST_COLUMNS = `
+  id, session_id, report_id, type, provider, model,
+  request_url, request_method, status_code,
+  prompt_tokens, completion_tokens, duration_ms, error, created_at
+`.trim();
+
+export class AiRequestLogRepo {
+  private stmts: {
+    insert: Database.Statement;
+    findBySession: Database.Statement;
+    findAll: Database.Statement;
+    findById: Database.Statement;
+    deleteBySession: Database.Statement;
+  };
+
+  constructor(private db: Database.Database) {
+    this.stmts = {
+      insert: db.prepare(
+        `INSERT INTO ai_request_logs
+         (session_id, report_id, type, provider, model,
+          request_url, request_method, request_headers, request_body,
+          status_code, response_headers, response_body,
+          prompt_tokens, completion_tokens, duration_ms, error, created_at)
+         VALUES
+         (@session_id, @report_id, @type, @provider, @model,
+          @request_url, @request_method, @request_headers, @request_body,
+          @status_code, @response_headers, @response_body,
+          @prompt_tokens, @completion_tokens, @duration_ms, @error, @created_at)`
+      ),
+      findBySession: db.prepare(
+        `SELECT ${AI_LOG_LIST_COLUMNS} FROM ai_request_logs
+         WHERE session_id = ? ORDER BY created_at DESC`
+      ),
+      findAll: db.prepare(
+        `SELECT ${AI_LOG_LIST_COLUMNS} FROM ai_request_logs
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`
+      ),
+      findById: db.prepare(
+        'SELECT * FROM ai_request_logs WHERE id = ?'
+      ),
+      deleteBySession: db.prepare(
+        'DELETE FROM ai_request_logs WHERE session_id = ?'
+      ),
+    };
+  }
+
+  insert(log: Omit<AiRequestLog, 'id'>): void {
+    this.stmts.insert.run(log);
+  }
+
+  findBySession(sessionId: string): AiRequestLog[] {
+    return this.stmts.findBySession.all(sessionId) as AiRequestLog[];
+  }
+
+  findAll(limit: number, offset: number): AiRequestLog[] {
+    return this.stmts.findAll.all(limit, offset) as AiRequestLog[];
+  }
+
+  findById(id: number): AiRequestLog | null {
+    return (this.stmts.findById.get(id) as AiRequestLog) ?? null;
+  }
+
+  deleteBySession(sessionId: string): void {
+    this.stmts.deleteBySession.run(sessionId);
   }
 }
