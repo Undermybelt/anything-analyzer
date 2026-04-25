@@ -1,0 +1,31 @@
+# Ship agent-facing runtime only.
+.github/
+resources/
+src/
+tests/
+out/preload/
+out/renderer/
+dist/
+node_modules/
+.vscode/
+.DS_Store
+*.log
+*.tgz
+*.tsbuildinfo
+report-*.md
+
+# Desktop packaging / release leftovers
+electron-builder.yml
+dev-app-update.yml
+USAGE.md
+pnpm-workspace.yaml
+tsconfig.json
+tsconfig.node.json
+tsconfig.web.json
+vitest.config.ts
+electron.vite.config.ts
+
+# Planning / internal docs
+docs/headless-runtime-plan.md
+docs/hermes-aa-cli-plan.md
+docs/superpowers/

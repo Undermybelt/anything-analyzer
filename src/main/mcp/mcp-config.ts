@@ -2,9 +2,19 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { app } from "electron";
 import type { MCPServerConfig } from "@shared/types";
+import type { PathProvider } from "../runtime/path-provider";
+import { loadNodeMcpServers, saveNodeMcpServers } from "../runtime/node-config";
+
+let pathProvider: PathProvider | null = null;
+
+export function setMcpConfigPathProvider(provider: PathProvider | null): void {
+  pathProvider = provider;
+}
 
 function getConfigPath(): string {
-  return join(app.getPath("userData"), "mcp-servers.json");
+  return pathProvider
+    ? pathProvider.getMcpServersPath()
+    : join(app.getPath("userData"), "mcp-servers.json");
 }
 
 /**
@@ -29,6 +39,10 @@ function migrateConfig(raw: Record<string, unknown>): MCPServerConfig {
  * Load MCP server configs from disk. Returns empty array if file does not exist.
  */
 export function loadMCPServers(): MCPServerConfig[] {
+  if (pathProvider) {
+    return loadNodeMcpServers(pathProvider);
+  }
+
   const path = getConfigPath();
   if (!existsSync(path)) return [];
   try {
@@ -40,6 +54,10 @@ export function loadMCPServers(): MCPServerConfig[] {
 }
 
 function persist(servers: MCPServerConfig[]): void {
+  if (pathProvider) {
+    saveNodeMcpServers(pathProvider, servers);
+    return;
+  }
   writeFileSync(getConfigPath(), JSON.stringify(servers, null, 2), "utf-8");
 }
 

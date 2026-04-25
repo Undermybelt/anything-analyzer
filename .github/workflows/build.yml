@@ -1,4 +1,4 @@
-name: Build & Release
+name: CLI Release
 
 on:
   workflow_dispatch:
@@ -7,19 +7,8 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: win
-          - os: macos-latest
-            platform: mac
-          - os: ubuntu-latest
-            platform: linux
-
-    runs-on: ${{ matrix.os }}
+  build-cli:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -37,50 +26,28 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
-        env:
-          ELECTRON_MIRROR: ""
 
-      - name: Build
-        run: pnpm run build
+      - name: Build CLI runtime
+        run: pnpm build:cli
 
-      - name: Package for Windows
-        if: matrix.platform == 'win'
-        run: npx electron-builder --win --publish never
+      - name: Run tests
+        run: pnpm test -- --run tests/main/node-headless.test.ts tests/main/headless-mcp.test.ts tests/main/db/migrations.test.ts
 
-      - name: Package for macOS
-        if: matrix.platform == 'mac'
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npx electron-builder --mac --x64 --arm64 --publish never
+      - name: Pack source tarball
+        run: npm pack
 
-      - name: Verify macOS updater metadata
-        if: matrix.platform == 'mac'
-        shell: bash
-        run: |
-          test -f dist/latest-mac.yml
-          cat dist/latest-mac.yml
-          grep -q 'arm64\.zip' dist/latest-mac.yml
-          grep -q 'x64\.zip' dist/latest-mac.yml
-
-      - name: Package for Linux
-        if: matrix.platform == 'linux'
-        run: npx electron-builder --linux --publish never
-
-      - name: Upload artifacts
+      - name: Upload CLI artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.platform }}
+          name: cli-release
           path: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.zip
-            dist/*.AppImage
-            dist/*.yml
-            dist/*.blockmap
+            *.tgz
+            bin/aa-cli.mjs
+            docs/hermes-aa-cli.md
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: build-cli
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -93,14 +60,11 @@ jobs:
           sparse-checkout: RELEASE_NOTES.md
           sparse-checkout-cone-mode: false
 
-      - name: Download all artifacts
+      - name: Download CLI artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
-
-      - name: List artifacts
-        run: find artifacts -type f | head -30
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -108,9 +72,6 @@ jobs:
           draft: false
           body_path: RELEASE_NOTES.md
           files: |
-            artifacts/*.exe
-            artifacts/*.dmg
-            artifacts/*.zip
-            artifacts/*.AppImage
-            artifacts/*.yml
-            artifacts/*.blockmap
+            artifacts/*.tgz
+            artifacts/aa-cli.mjs
+            artifacts/hermes-aa-cli.md

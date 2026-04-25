@@ -82,6 +82,12 @@ export class SessionManager {
     return this.getElectronSession(activeId);
   }
 
+  async clearActiveSessionData(): Promise<void> {
+    const elSession = this.getActiveElectronSession() ?? electronSession.defaultSession;
+    await elSession.clearStorageData().catch(() => {});
+    await elSession.clearCache().catch(() => {});
+  }
+
   /** Apply proxy config to an Electron session. */
   private async applyProxyToSession(
     elSession: ElectronSession,
@@ -147,7 +153,7 @@ export class SessionManager {
    * Start capturing on a session. Attaches capture pipelines to all existing tabs
    * and auto-attaches to new tabs created during the session.
    */
-  async startCapture(
+  async startBrowserUiCapture(
     sessionId: string,
     tabManager: TabManager,
     rendererWebContents: WebContents,
@@ -224,6 +230,29 @@ export class SessionManager {
     tabManager.on("tab-closed", this.tabClosedHandler);
 
     // Update session status
+    this.sessionsRepo.updateStatus(sessionId, "running");
+  }
+
+  async startExternalCapture(sessionId: string): Promise<void> {
+    const session = this.sessionsRepo.findById(sessionId);
+    if (!session) throw new Error(`Session ${sessionId} not found`);
+
+    if (this.currentSessionId) {
+      await this.stopCapture(this.currentSessionId);
+    }
+
+    if (this.stealthSessionId) {
+      this.suspendStealthListeners();
+    }
+
+    this.currentSessionId = sessionId;
+    this.tabManager = null;
+    this.captureEngine.start(sessionId, null);
+
+    if (this.profileStore) {
+      this.profileStore.getOrCreate(sessionId);
+    }
+
     this.sessionsRepo.updateStatus(sessionId, "running");
   }
 

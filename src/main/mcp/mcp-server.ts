@@ -9,10 +9,10 @@ import {
 } from "node:http";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { session } from "electron";
 import type { SessionManager } from "../session/session-manager";
 import type { AiAnalyzer } from "../ai/ai-analyzer";
-import type { WindowManager } from "../window";
+import type { BrowserBackend } from "../runtime/browser-backend";
+import { BrowserBackendUnavailableError } from "../runtime/browser-backend";
 import type {
   RequestsRepo,
   JsHooksRepo,
@@ -25,7 +25,7 @@ import { loadLLMConfig } from "../ipc";
 interface MCPServerDeps {
   sessionManager: SessionManager;
   aiAnalyzer: AiAnalyzer;
-  windowManager: WindowManager;
+  browserBackend: BrowserBackend;
   requestsRepo: RequestsRepo;
   jsHooksRepo: JsHooksRepo;
   storageSnapshotsRepo: StorageSnapshotsRepo;
@@ -229,7 +229,7 @@ function registerTools(server: McpServer, deps: MCPServerDeps): void {
   const {
     sessionManager,
     aiAnalyzer,
-    windowManager,
+    browserBackend,
     requestsRepo,
     jsHooksRepo,
     storageSnapshotsRepo,
@@ -268,21 +268,24 @@ function registerTools(server: McpServer, deps: MCPServerDeps): void {
     "start_capture",
     {
       description:
-        "Start capturing HTTP requests for a session. The embedded browser must be open.",
+        "Start capturing HTTP requests for a session. Supports browser-ui capture and external/headless MITM-only capture.",
       inputSchema: z.object({
         sessionId: z.string().describe("Session ID"),
+        mode: z.enum(["browser-ui", "external"]).optional().describe("Capture mode override"),
       }),
     },
-    async ({ sessionId }) => {
-      const tabManager = windowManager.getTabManager();
-      const mainWin = windowManager.getMainWindow();
-      if (!tabManager || !mainWin) throw new Error("Browser not ready");
-      await sessionManager.startCapture(
-        sessionId,
-        tabManager,
-        mainWin.webContents,
-      );
-      return text({ success: true });
+    async ({ sessionId, mode }) => {
+      const captureMode = mode ?? (browserBackend.hasUi() ? "browser-ui" : "external");
+      if (captureMode === "browser-ui") {
+        const captureAdapter = browserBackend.getCaptureStartAdapter();
+        if (!captureAdapter) {
+          throw new BrowserBackendUnavailableError("Capture start requires browser-ui backend");
+        }
+        await captureAdapter.start(sessionId);
+      } else {
+        await sessionManager.startExternalCapture(sessionId);
+      }
+      return text({ success: true, backend: browserBackend.kind, mode: captureMode });
     },
   );
 
@@ -339,106 +342,82 @@ function registerTools(server: McpServer, deps: MCPServerDeps): void {
   server.registerTool(
     "navigate",
     {
-      description: "Navigate the active browser tab to a URL",
+      description: "Navigate the active browser tab to a URL. Browser-ui only.",
       inputSchema: z.object({ url: z.string().describe("URL to navigate to") }),
     },
     async ({ url }) => {
-      await windowManager.navigateTo(url);
-      return text({ success: true, url });
+      await browserBackend.navigateTo(url);
+      return text({ success: true, url, backend: browserBackend.kind });
     },
   );
 
   server.registerTool(
     "browser_back",
     {
-      description: "Go back in the active browser tab",
+      description: "Go back in the active browser tab. Browser-ui only.",
     },
     async () => {
-      windowManager.goBack();
-      return text({ success: true });
+      browserBackend.goBack();
+      return text({ success: true, backend: browserBackend.kind });
     },
   );
 
   server.registerTool(
     "browser_forward",
     {
-      description: "Go forward in the active browser tab",
+      description: "Go forward in the active browser tab. Browser-ui only.",
     },
     async () => {
-      windowManager.goForward();
-      return text({ success: true });
+      browserBackend.goForward();
+      return text({ success: true, backend: browserBackend.kind });
     },
   );
 
   server.registerTool(
     "browser_reload",
     {
-      description: "Reload the active browser tab",
+      description: "Reload the active browser tab. Browser-ui only.",
     },
     async () => {
-      windowManager.reload();
-      return text({ success: true });
+      browserBackend.reload();
+      return text({ success: true, backend: browserBackend.kind });
     },
   );
 
   server.registerTool(
     "create_tab",
     {
-      description: "Create a new browser tab",
+      description: "Create a new browser tab. Browser-ui only.",
       inputSchema: z.object({
         url: z.string().optional().describe("Optional URL to open"),
       }),
     },
     async ({ url }) => {
-      const tabManager = windowManager.getTabManager();
-      if (!tabManager) throw new Error("Browser not ready");
-      const tab = tabManager.createTab(url);
-      return text({ id: tab.id, url: tab.url, title: tab.title });
+      const tab = browserBackend.createTab(url);
+      return text({ ...tab, backend: browserBackend.kind });
     },
   );
 
   server.registerTool(
     "close_tab",
     {
-      description: "Close a browser tab",
+      description: "Close a browser tab. Browser-ui only.",
       inputSchema: z.object({ tabId: z.string() }),
     },
     async ({ tabId }) => {
-      const tabManager = windowManager.getTabManager();
-      if (!tabManager) throw new Error("Browser not ready");
-      tabManager.closeTab(tabId);
-      return text({ success: true });
+      browserBackend.closeTab(tabId);
+      return text({ success: true, backend: browserBackend.kind });
     },
   );
 
   server.registerTool(
     "list_tabs",
     {
-      description: "List all browser tabs with their URLs and titles",
+      description: "List all browser tabs with their URLs and titles. Empty in headless mode.",
     },
     async () => {
-      const tabManager = windowManager.getTabManager();
-      if (!tabManager) throw new Error("Browser not ready");
-      const tabs = tabManager.getAllTabs().map((t) => ({
-        id: t.id,
-        url: t.url,
-        title: t.title,
-      }));
-      return text(tabs);
-    },
-  );
-
-  server.registerTool(
-    "clear_browser_env",
-    {
-      description:
-        "Clear all browser data (cookies, localStorage, sessionStorage, cache). Current login state will be lost.",
-    },
-    async () => {
-      await session.defaultSession.clearStorageData();
-      await session.defaultSession.clearCache();
-      windowManager.getTabManager()?.getActiveWebContents()?.reload();
-      return text({ success: true });
+      const tabs = browserBackend.listTabs();
+      return text({ backend: browserBackend.kind, tabs });
     },
   );
 
@@ -446,15 +425,18 @@ function registerTools(server: McpServer, deps: MCPServerDeps): void {
     "browser_screenshot",
     {
       description:
-        "Capture a screenshot of the current active browser tab. Returns a PNG image.",
+        "Capture a screenshot of the current active browser tab. Browser-ui only. Returns a PNG image.",
     },
     async () => {
-      const webContents = windowManager.getTabManager()?.getActiveWebContents();
-      if (!webContents) throw new Error("Browser not ready");
-      const image = await webContents.capturePage();
-      const base64 = image.toPNG().toString("base64");
+      const base64 = await browserBackend.captureScreenshot();
       return {
-        content: [{ type: "image" as const, data: base64, mimeType: "image/png" }],
+        content: [
+          {
+            type: "image" as const,
+            data: base64,
+            mimeType: "image/png",
+          },
+        ],
       };
     },
   );
@@ -469,7 +451,7 @@ function registerTools(server: McpServer, deps: MCPServerDeps): void {
         "See https://chromedevtools.github.io/devtools-protocol/ for available methods.",
       inputSchema: z.object({
         method: z.string().describe("CDP method name, e.g. 'Page.captureScreenshot', 'Runtime.evaluate', 'DOM.getDocument'"),
-        params: z.record(z.unknown()).optional().describe("CDP method parameters as a JSON object"),
+        params: z.object({}).catchall(z.unknown()).optional().describe("CDP method parameters as a JSON object"),
       }),
     },
     async ({ method, params }) => {
@@ -728,7 +710,7 @@ function registerTools(server: McpServer, deps: MCPServerDeps): void {
 // ---- Resource Registration ----
 
 function registerResources(server: McpServer, deps: MCPServerDeps): void {
-  const { sessionManager, windowManager } = deps;
+  const { sessionManager, browserBackend } = deps;
 
   server.registerResource(
     "sessions",
@@ -776,23 +758,15 @@ function registerResources(server: McpServer, deps: MCPServerDeps): void {
     "browser-tabs",
     "browser://tabs",
     {
-      description: "Current browser tabs",
+      description: "Current browser tabs; empty when running headless backend",
     },
     async (uri) => {
-      const tabs =
-        windowManager
-          .getTabManager()
-          ?.getAllTabs()
-          .map((t) => ({
-            id: t.id,
-            url: t.url,
-            title: t.title,
-          })) || [];
+      const tabs = browserBackend.listTabs();
       return {
         contents: [
           {
             uri: uri.href,
-            text: JSON.stringify(tabs, null, 2),
+            text: JSON.stringify({ backend: browserBackend.kind, tabs }, null, 2),
             mimeType: "application/json",
           },
         ],

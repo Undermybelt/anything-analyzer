@@ -1,17 +1,31 @@
 {
   "name": "anything-analyzer",
   "version": "3.5.2",
-  "description": "Universal web protocol analyzer with embedded browser and AI-powered analysis",
+  "description": "CLI bridge and headless runtime for agent-driven web traffic reverse analysis via anything-analyzer + MITM",
   "packageManager": "pnpm@10.24.0",
-  "main": "./out/main/index.js",
+  "main": "./out/main/nodeHeadless.js",
+  "bin": {
+    "aa-cli": "./bin/aa-cli.mjs"
+  },
+  "files": [
+    "bin/aa-cli.mjs",
+    "out/main/nodeHeadless.js",
+    "docs/hermes-aa-cli.md",
+    "README.en.md",
+    "README.md",
+    "RELEASE_NOTES.md"
+  ],
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
+    "build": "pnpm build:cli",
+    "build:cli": "electron-vite build --config electron.vite.cli.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/ --ext .ts,.tsx",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "aa:cli": "node ./bin/aa-cli.mjs",
+    "aa:headless": "node ./out/main/nodeHeadless.js",
+    "aa:headless:oneshot": "node ./out/main/nodeHeadless.js --oneshot",
+    "pack:cli": "pnpm build:cli && node ./bin/aa-cli.mjs status && npm pack",
+    "prepublishOnly": "pnpm build:cli"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",

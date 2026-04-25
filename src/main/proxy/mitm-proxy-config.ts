@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { app } from "electron";
+import type { PathProvider } from "../runtime/path-provider";
+import { loadNodeMitmProxyConfig, saveNodeMitmProxyConfig } from "../runtime/node-config";
 
 export interface MitmProxyConfig {
   enabled: boolean;
@@ -16,11 +18,23 @@ const DEFAULT_CONFIG: MitmProxyConfig = {
   systemProxy: false,
 };
 
+let pathProvider: PathProvider | null = null;
+
+export function setMitmProxyConfigPathProvider(provider: PathProvider | null): void {
+  pathProvider = provider;
+}
+
 function getConfigPath(): string {
-  return join(app.getPath("userData"), "mitm-proxy-config.json");
+  return pathProvider
+    ? pathProvider.getMitmProxyConfigPath()
+    : join(app.getPath("userData"), "mitm-proxy-config.json");
 }
 
 export function loadMitmProxyConfig(): MitmProxyConfig {
+  if (pathProvider) {
+    return loadNodeMitmProxyConfig(pathProvider);
+  }
+
   const configPath = getConfigPath();
   if (!existsSync(configPath)) return { ...DEFAULT_CONFIG };
 
@@ -33,5 +47,9 @@ export function loadMitmProxyConfig(): MitmProxyConfig {
 }
 
 export function saveMitmProxyConfig(config: MitmProxyConfig): void {
+  if (pathProvider) {
+    saveNodeMitmProxyConfig(pathProvider, config);
+    return;
+  }
   writeFileSync(getConfigPath(), JSON.stringify(config, null, 2), "utf-8");
 }

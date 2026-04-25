@@ -1,9 +1,15 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
+import type { PathProvider } from '../runtime/path-provider'
 
 let db: Database.Database | null = null
+let pathProvider: PathProvider | null = null
+
+export function setDatabasePathProvider(provider: PathProvider | null): void {
+  pathProvider = provider
+}
 
 /**
  * Get or initialize the SQLite database connection.
@@ -12,14 +18,14 @@ let db: Database.Database | null = null
 export function getDatabase(): Database.Database {
   if (db) return db
 
-  const userDataPath = app.getPath('userData')
-  const dbDir = join(userDataPath, 'data')
+  const dbPath = pathProvider
+    ? pathProvider.getDatabasePath()
+    : join(app.getPath('userData'), 'data', 'anything-register.db')
+  const dbDir = dirname(dbPath)
 
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true })
   }
-
-  const dbPath = join(dbDir, 'anything-register.db')
 
   db = new Database(dbPath)
 

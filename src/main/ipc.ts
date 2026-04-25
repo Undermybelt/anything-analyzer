@@ -1,4 +1,5 @@
 import { ipcMain, dialog, app, session } from "electron";
+import type { Session as ElectronSession } from "electron";
 import type { LLMProviderConfig, MCPServerConfig, MCPServerSettings, MitmProxyConfig, ProxyConfig, PromptTemplate } from "@shared/types";
 import type { SessionManager } from "./session/session-manager";
 import type { AiAnalyzer } from "./ai/ai-analyzer";
@@ -35,10 +36,24 @@ import type {
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "node:crypto";
+import type { PathProvider } from "./runtime/path-provider";
+import { loadNodeMainMcpServerConfig, saveNodeMainMcpServerConfig } from "./runtime/node-main-config";
 
 /**
  * Register all IPC handlers for communication between renderer and main process.
  */
+
+let ipcPathProvider: PathProvider | null = null;
+
+export function setIpcPathProvider(provider: PathProvider | null): void {
+  ipcPathProvider = provider;
+}
+
+function getProxyConfigPath(): string {
+  return ipcPathProvider
+    ? ipcPathProvider.getProxyConfigPath()
+    : join(app.getPath("userData"), "proxy-config.json");
+}
 
 /** Active analysis abort controllers, keyed by sessionId */
 const analysisControllers = new Map<string, AbortController>();
@@ -99,7 +114,7 @@ export function registerIpcHandlers(deps: {
     const mainWin = windowManager.getMainWindow();
     if (!tabManager || !mainWin) throw new Error("Browser not ready");
     const proxyConfig = loadProxyConfig();
-    await sessionManager.startCapture(
+    await sessionManager.startBrowserUiCapture(
       sessionId,
       tabManager,
       mainWin.webContents,
@@ -172,9 +187,7 @@ export function registerIpcHandlers(deps: {
   });
 
   ipcMain.handle("browser:clearEnv", async () => {
-    const elSession = sessionManager.getActiveElectronSession() ?? session.defaultSession;
-    await elSession.clearStorageData();
-    await elSession.clearCache();
+    await sessionManager.clearActiveSessionData();
     windowManager.getTabManager()?.getActiveWebContents()?.reload();
   });
 
@@ -707,10 +720,6 @@ function saveLLMConfig(config: LLMProviderConfig): void {
 
 // ---- Proxy config persistence ----
 
-function getProxyConfigPath(): string {
-  return join(app.getPath("userData"), "proxy-config.json");
-}
-
 export function loadProxyConfig(): ProxyConfig | null {
   const path = getProxyConfigPath();
   if (!existsSync(path)) return null;
@@ -727,7 +736,7 @@ function saveProxyConfigFile(config: ProxyConfig): void {
 
 export async function applyProxy(
   config: ProxyConfig | null,
-  elSession: Electron.Session = session.defaultSession,
+  elSession: ElectronSession = session.defaultSession,
 ): Promise<void> {
   if (!config || config.type === "none") {
     await elSession.setProxy({ mode: "direct" });
@@ -745,10 +754,16 @@ export async function applyProxy(
 const DEFAULT_MCP_SERVER_CONFIG: MCPServerSettings = { enabled: false, port: 23816, authEnabled: true, authToken: '' };
 
 function getMCPServerConfigPath(): string {
-  return join(app.getPath("userData"), "mcp-server-config.json");
+  return ipcPathProvider
+    ? ipcPathProvider.getMcpServerConfigPath()
+    : join(app.getPath("userData"), "mcp-server-config.json");
 }
 
 export function loadMCPServerConfig(): MCPServerSettings {
+  if (ipcPathProvider) {
+    return loadNodeMainMcpServerConfig(ipcPathProvider);
+  }
+
   const path = getMCPServerConfigPath();
   let config: MCPServerSettings;
   if (!existsSync(path)) {
@@ -760,7 +775,6 @@ export function loadMCPServerConfig(): MCPServerSettings {
       config = { ...DEFAULT_MCP_SERVER_CONFIG };
     }
   }
-  // Auto-generate token if empty (first run or upgraded from old config)
   if (!config.authToken) {
     config.authToken = randomUUID();
     saveMCPServerConfig(config);
@@ -769,5 +783,9 @@ export function loadMCPServerConfig(): MCPServerSettings {
 }
 
 function saveMCPServerConfig(config: MCPServerSettings): void {
+  if (ipcPathProvider) {
+    saveNodeMainMcpServerConfig(ipcPathProvider, config);
+    return;
+  }
   writeFileSync(getMCPServerConfigPath(), JSON.stringify(config, null, 2), "utf-8");
 }
