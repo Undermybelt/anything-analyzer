@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { getDatabase, closeDatabase, setDatabasePathProvider } from "../db/database";
 import { runMigrations } from "../db/migrations";
+
 import {
   SessionsRepo,
   RequestsRepo,
@@ -12,7 +13,7 @@ import {
   AiRequestLogRepo,
 } from "../db/repositories";
 import { CaptureEngine } from "../capture/capture-engine";
-import { SessionManager } from "../session/session-manager";
+import { NodeSessionManager } from "../node-session-manager";
 import { AiAnalyzer } from "../ai/ai-analyzer";
 import { MCPClientManager } from "../mcp/mcp-manager";
 import { CaManager } from "../proxy/ca-manager";
@@ -21,6 +22,7 @@ import { ProfileStore } from "../fingerprint/profile-store";
 import type { RuntimeContext } from "./runtime-context";
 import type { BrowserBackend } from "./browser-backend";
 import type { PathProvider } from "./path-provider";
+import { setIpcPathProvider } from "../ipc";
 
 export interface BootstrapOptions {
   mode: "electron-ui" | "headless";
@@ -31,6 +33,7 @@ export interface BootstrapOptions {
 export function createRuntimeContext(options: BootstrapOptions): RuntimeContext {
   options.pathProvider.ensureAppDirs();
   setDatabasePathProvider(options.pathProvider);
+  setIpcPathProvider(options.pathProvider);
 
   const db: Database.Database = getDatabase();
   runMigrations(db);
@@ -46,7 +49,7 @@ export function createRuntimeContext(options: BootstrapOptions): RuntimeContext 
 
   const profileStore = new ProfileStore(fingerprintRepo);
   const captureEngine = new CaptureEngine(requestsRepo, jsHooksRepo, storageSnapshotsRepo);
-  const sessionManager = new SessionManager(sessionsRepo, captureEngine, profileStore);
+  const sessionManager = new NodeSessionManager(sessionsRepo, captureEngine, profileStore);
   sessionManager.recoverFromCrash();
 
   const aiAnalyzer = new AiAnalyzer(
